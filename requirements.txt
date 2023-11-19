@@ -1,2 +1,4 @@
-ml_insights
-betacal
+numpy
+pandas
+matplotlib
+scikit-learn
