@@ -15,3 +15,15 @@ source venv/bin/activate
 pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
 pip install -r requirements.txt
 ```
+
+## Instructions
+
+#### Train classifier
+```
+python train.py \
+--model resnet18 \
+--data-path data \
+--output-dir output \
+--workers 4 \
+--epochs 1
+```

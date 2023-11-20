@@ -51,10 +51,11 @@ def train_one_epoch(model, criterion, optimizer, data_loader, device, epoch, arg
                 # Reset ema buffer to keep copying weights during warmup period
                 model_ema.n_averaged.fill_(0)
 
+        acc1 = utils.accuracy(output, target, topk=(1, ))[0]
         # acc1, acc5 = utils.accuracy(output, target, topk=(1, 5))
         batch_size = image.shape[0]
         metric_logger.update(loss=loss.item(), lr=optimizer.param_groups[0]["lr"])
-        # metric_logger.meters["acc1"].update(acc1.item(), n=batch_size)
+        metric_logger.meters["acc1"].update(acc1.item(), n=batch_size)
         # metric_logger.meters["acc5"].update(acc5.item(), n=batch_size)
         metric_logger.meters["img/s"].update(batch_size / (time.time() - start_time))
 
@@ -72,12 +73,14 @@ def evaluate(model, criterion, data_loader, device, print_freq=100, log_suffix="
             output = model(image)
             loss = criterion(output, target)
 
+            acc1 = utils.accuracy(output, target, topk=(1, ))[0]
+
             # acc1, acc5 = utils.accuracy(output, target, topk=(1, 5))
             # FIXME need to take into account that the datasets
             # could have been padded in distributed setup
             batch_size = image.shape[0]
             metric_logger.update(loss=loss.item())
-            # metric_logger.meters["acc1"].update(acc1.item(), n=batch_size)
+            metric_logger.meters["acc1"].update(acc1.item(), n=batch_size)
             # metric_logger.meters["acc5"].update(acc5.item(), n=batch_size)
             num_processed_samples += batch_size
     # gather the stats from all processes
@@ -98,8 +101,8 @@ def evaluate(model, criterion, data_loader, device, print_freq=100, log_suffix="
 
     metric_logger.synchronize_between_processes()
 
-    # print(f"{header} Acc@1 {metric_logger.acc1.global_avg:.3f} Acc@5 {metric_logger.acc5.global_avg:.3f}")
-    # return metric_logger.acc1.global_avg
+    print(f"{header} Acc@1 {metric_logger.acc1.global_avg:.3f}") # Acc@5 {metric_logger.acc5.global_avg:.3f}")
+    return metric_logger.acc1.global_avg
 
 
 def _get_cache_path(filepath):
@@ -357,6 +360,8 @@ def main(args):
         else:
             evaluate(model, criterion, data_loader_test, device=device)
         return
+    
+    evaluate(model, criterion, data_loader_test, device=device)
 
     print("Start training")
     start_time = time.time()
