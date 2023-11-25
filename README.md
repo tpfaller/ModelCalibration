@@ -30,5 +30,25 @@ python train.py \
 --augmix-severity 0 \
 --ra-reps 0 \
 --ra-magnitude 0 \
+--weights DEFAULT \
+--lr 0.0003
+```
+
+#### Start Hypertuning
+```
+mlflow server --host 127.0.0.1 --port 8080
+```
+
+```
+python hyperparameter_tuning.py \
+--model mobilenet_v3_large \
+--opt adamw \
+--data-path data \
+--output-dir output \
+--workers 4 \
+--epochs 1 \
+--augmix-severity 0 \
+--ra-reps 0 \
+--ra-magnitude 0 \
 --lr 0.003
 ```

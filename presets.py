@@ -44,7 +44,7 @@ class ClassificationPresetTrain:
 
         transforms += [
             T.Resize(256, interpolation=interpolation, antialias=True),
-            T.CenterCrop(crop_size),
+            T.RandomCrop(crop_size),
         ]
         if hflip_prob > 0:
             transforms.append(T.RandomHorizontalFlip(hflip_prob))

@@ -116,6 +116,21 @@ def _get_cache_path(filepath):
     return cache_path
 
 
+def change_head(model, model_name, num_classes):
+    if "resnet" in model_name:
+        model.fc = nn.Linear(model.fc.in_features, out_features=num_classes)
+    elif "efficientnet" in model_name:
+        model.classifier = nn.Sequential(
+            nn.Dropout(p=.2, inplace=True),
+            nn.Linear(in_features=model.classifier[1].in_features, out_features=num_classes)
+        )
+    elif "mobilenet" in model_name:
+        model.classifier[3] = nn.Linear(in_features=model.classifier[3].in_features, out_features=num_classes)
+    else:
+        assert True, "Something went wrong."
+    return model
+
+
 def load_data(traindir, valdir, args):
     # Data loading code
     print("Loading data")
@@ -248,7 +263,8 @@ def main(args):
     )
 
     print("Creating model")
-    model = torchvision.models.get_model(args.model, weights=args.weights, num_classes=num_classes)
+    model = torchvision.models.get_model(args.model, weights=args.weights)
+    model = change_head(model=model, model_name=args.model, num_classes=num_classes)
     model.to(device)
 
     if args.distributed and args.sync_bn:
