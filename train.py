@@ -15,6 +15,8 @@ from torch.utils.data.dataloader import default_collate
 from torchvision.transforms.functional import InterpolationMode
 from transforms import get_mixup_cutmix
 
+import mlflow
+
 
 def train_one_epoch(model, criterion, optimizer, data_loader, device, epoch, args, model_ema=None, scaler=None):
     model.train()
@@ -252,7 +254,8 @@ def main(args):
     if args.distributed and args.sync_bn:
         model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
 
-    criterion = nn.CrossEntropyLoss(label_smoothing=args.label_smoothing)
+    class_weights = torch.Tensor([1.23796424, 5.20231214])
+    criterion = nn.CrossEntropyLoss(label_smoothing=args.label_smoothing, weight=class_weights)
 
     custom_keys_weight_decay = []
     if args.bias_weight_decay is not None:

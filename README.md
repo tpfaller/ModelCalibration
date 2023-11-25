@@ -21,9 +21,14 @@ pip install -r requirements.txt
 #### Train classifier
 ```
 python train.py \
---model resnet18 \
+--model mobilenet_v3_large \
+--opt adamw \
 --data-path data \
 --output-dir output \
 --workers 4 \
---epochs 1
+--epochs 10 \
+--augmix-severity 0 \
+--ra-reps 0 \
+--ra-magnitude 0 \
+--lr 0.003
 ```
