@@ -52,5 +52,13 @@ class Calibrator:
         np_ground_truth = np.concatenate([x.numpy() for x in self.ground_truth])
         np_predictions = np.concatenate([x.numpy() for x in self.predictions])
         np_confidence = np.concatenate([x[:,0].numpy() for x in self.confidence_scores])
+
+        self.confidence_scores = list()
+        self.predictions = list()
+        self.ground_truth = list()
+
         return np_ground_truth, np_predictions, np_confidence
-        
+    
+    def train_calibrator(self):
+        np_ground_truth, np_predictions, np_confidence = self.preprocess()
+        self.fit_transform(np_confidence, )
