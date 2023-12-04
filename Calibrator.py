@@ -6,6 +6,8 @@ from sklearn.linear_model import LogisticRegression
 import ml_insights as mli
 from betacal import BetaCalibration
 
+import calibration_utils
+
 class Calibrator:
     def __init__(self) -> None:
         self.platt_scaler = LogisticRegression(C=99999999999, solver='lbfgs')
@@ -41,7 +43,7 @@ class Calibrator:
 
     def fit_transform(self, pred_proba_train: np.ndarray, real_proba_train: np.ndarray) -> Dict[str, np.ndarray]:
         self.fit(pred_proba_train, real_proba_train)
-        self.transform(pred_proba=pred_proba_train)
+        return self.transform(pred_proba=pred_proba_train)
 
     def update(self, output: torch.Tensor, target: torch.Tensor) -> None:
         self.confidence_scores.append(torch.nn.functional.softmax(output, dim=1))
@@ -61,4 +63,24 @@ class Calibrator:
     
     def train_calibrator(self):
         np_ground_truth, np_predictions, np_confidence = self.preprocess()
-        self.fit_transform(np_confidence, )
+        bins, binned, bin_accs, bin_confs, bin_sizes = calibration_utils.calc_bins(np_ground_truth, np_confidence)
+
+        np_real_proba = np.zeros_like(np_ground_truth)
+
+        np_real_proba = np.zeros_like(np_ground_truth, dtype=np.float32)
+        for sample, bin in enumerate(binned):
+            np_real_proba[sample] = bin_accs[bin]
+
+        self.fit_transform(np_confidence, np_real_proba)
+
+    def eval_calibrator(self):
+        np_ground_truth, np_predictions, np_confidence = self.preprocess()
+        bins, binned, bin_accs, bin_confs, bin_sizes = calibration_utils.calc_bins(np_ground_truth, np_confidence)
+
+        np_real_proba = np.zeros_like(np_ground_truth)
+
+        np_real_proba = np.zeros_like(np_ground_truth, dtype=np.float32)
+        for sample, bin in enumerate(binned):
+            np_real_proba[sample] = bin_accs[bin]
+
+        self.transform(np_confidence, np_real_proba)
