@@ -13,11 +13,11 @@ class Calibrator:
         self.platt_scaler = LogisticRegression(C=99999999999, solver='lbfgs')
         self.beta_calibrator = BetaCalibration()
         self.spline_calibrator = mli.SplineCalib(
-            penalty='l2',                   
-            knot_sample_size=40,
-            cv_spline=5,
-            unity_prior=False,
-            unity_prior_weight=128
+            # penalty='l2',                   
+            # knot_sample_size=40,
+            # cv_spline=5,
+            # unity_prior=False,
+            # unity_prior_weight=128
             )
         
         self.calibrator = dict()
@@ -61,26 +61,23 @@ class Calibrator:
 
         return np_ground_truth, np_predictions, np_confidence
     
-    def train_calibrator(self):
+    def train_calibrator(self) -> np.ndarray:
         np_ground_truth, np_predictions, np_confidence = self.preprocess()
         bins, binned, bin_accs, bin_confs, bin_sizes = calibration_utils.calc_bins(np_ground_truth, np_confidence)
 
-        np_real_proba = np.zeros_like(np_ground_truth)
+        np_real_proba = compute_real_probabilities(np_ground_truth, binned, bin_accs)
+        return self.fit_transform(np_confidence, np_real_proba)
 
-        np_real_proba = np.zeros_like(np_ground_truth, dtype=np.float32)
-        for sample, bin in enumerate(binned):
-            np_real_proba[sample] = bin_accs[bin]
-
-        self.fit_transform(np_confidence, np_real_proba)
-
-    def eval_calibrator(self):
+    def eval_calibrator(self) -> np.ndarray:
         np_ground_truth, np_predictions, np_confidence = self.preprocess()
         bins, binned, bin_accs, bin_confs, bin_sizes = calibration_utils.calc_bins(np_ground_truth, np_confidence)
 
-        np_real_proba = np.zeros_like(np_ground_truth)
+        np_real_proba = compute_real_probabilities(np_ground_truth, binned, bin_accs)
+        return self.transform(np_confidence, np_real_proba)
+    
 
-        np_real_proba = np.zeros_like(np_ground_truth, dtype=np.float32)
-        for sample, bin in enumerate(binned):
-            np_real_proba[sample] = bin_accs[bin]
-
-        self.transform(np_confidence, np_real_proba)
+def compute_real_probabilities(np_ground_truth: np.ndarray, binned: np.ndarray, bin_accs: np.ndarray) -> np.ndarray:
+    np_real_proba = np.zeros_like(np_ground_truth, dtype=np.float32)
+    for sample, bin in enumerate(binned):
+        np_real_proba[sample] = bin_accs[bin]
+    return np_real_proba
