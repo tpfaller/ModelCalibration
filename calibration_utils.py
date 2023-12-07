@@ -36,6 +36,9 @@ def calc_bins(y_test, preds):
         if bin_sizes[bin] > 0:
             bin_accs[bin] = (y_test[binned==bin]).sum() / bin_sizes[bin]
             bin_confs[bin] = (preds[binned==bin]).sum() / bin_sizes[bin]
+        else:
+            bin_accs[bin] = 0.
+            bin_confs[bin] = 0.
 
     return bins, binned, bin_accs, bin_confs, bin_sizes
 

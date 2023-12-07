@@ -24,7 +24,7 @@ class Calibrator:
         self.calibrator = {
             "platt_scaler": self.platt_scaler,
             "beta_calibrator": self.beta_calibrator,
-            "spline_calibrator": self.spline_calibrator
+            # "spline_calibrator": self.spline_calibrator
         }
 
         self.confidence_scores = list()
@@ -32,13 +32,18 @@ class Calibrator:
         self.ground_truth = list()
 
     def fit(self, pred_proba_train: np.ndarray, real_proba_train: np.ndarray) -> None:
-        for calibrator in self.calibrator.values():
+        for name, calibrator in self.calibrator.items():
+            print(f"Fit {name}")
             calibrator.fit(pred_proba_train.reshape(-1,1), real_proba_train)
     
     def transform(self, pred_proba: np.ndarray) -> Dict[str, np.ndarray]:
         calibrated_predictions = dict()
         for name, calibrator in self.calibrator.items():
-            calibrated_predictions[name] = calibrator.predict_proba(pred_proba)
+            print(f"{name} predicts calibrated probabilities.")
+            if name == "platt_scaler":
+                calibrated_predictions[name] = calibrator.predict_proba(pred_proba.reshape(-1,1))
+            else:
+                calibrated_predictions[name] = calibrator.predict(pred_proba.reshape(-1,1))
         return calibrated_predictions
 
     def fit_transform(self, pred_proba_train: np.ndarray, real_proba_train: np.ndarray) -> Dict[str, np.ndarray]:
@@ -62,18 +67,19 @@ class Calibrator:
         return np_ground_truth, np_predictions, np_confidence
     
     def train_calibrator(self) -> np.ndarray:
+        print("Preprocess collected samples.")
         np_ground_truth, np_predictions, np_confidence = self.preprocess()
-        bins, binned, bin_accs, bin_confs, bin_sizes = calibration_utils.calc_bins(np_ground_truth, np_confidence)
+        # bins, binned, bin_accs, bin_confs, bin_sizes = calibration_utils.calc_bins(np_ground_truth, np_confidence)
+        # np_real_proba = compute_real_probabilities(np_ground_truth, binned, bin_accs)
+        # return self.fit_transform(np_confidence, np_real_proba)
+        return self.fit_transform(np_confidence, np_ground_truth)
 
-        np_real_proba = compute_real_probabilities(np_ground_truth, binned, bin_accs)
-        return self.fit_transform(np_confidence, np_real_proba)
 
     def eval_calibrator(self) -> np.ndarray:
         np_ground_truth, np_predictions, np_confidence = self.preprocess()
-        bins, binned, bin_accs, bin_confs, bin_sizes = calibration_utils.calc_bins(np_ground_truth, np_confidence)
-
-        np_real_proba = compute_real_probabilities(np_ground_truth, binned, bin_accs)
-        return self.transform(np_confidence, np_real_proba)
+        # bins, binned, bin_accs, bin_confs, bin_sizes = calibration_utils.calc_bins(np_ground_truth, np_confidence)
+        # np_real_proba = compute_real_probabilities(np_ground_truth, binned, bin_accs)
+        return self.transform(np_confidence)
     
 
 def compute_real_probabilities(np_ground_truth: np.ndarray, binned: np.ndarray, bin_accs: np.ndarray) -> np.ndarray:
