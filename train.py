@@ -14,7 +14,6 @@ from torch import nn
 
 from torchvision.transforms.functional import InterpolationMode
 
-
 import mlflow
 
 
