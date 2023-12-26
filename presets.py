@@ -26,10 +26,6 @@ class ClassificationPresetTrain:
         std=(0.229, 0.224, 0.225),
         interpolation=InterpolationMode.BILINEAR,
         hflip_prob=0.5,
-        auto_augment_policy=None,
-        ra_magnitude=9,
-        augmix_severity=3,
-        random_erase_prob=0.0,
         backend="pil",
         use_v2=False,
     ):
@@ -48,16 +44,6 @@ class ClassificationPresetTrain:
         ]
         if hflip_prob > 0:
             transforms.append(T.RandomHorizontalFlip(hflip_prob))
-        if auto_augment_policy is not None:
-            if auto_augment_policy == "ra":
-                transforms.append(T.RandAugment(interpolation=interpolation, magnitude=ra_magnitude))
-            elif auto_augment_policy == "ta_wide":
-                transforms.append(T.TrivialAugmentWide(interpolation=interpolation))
-            elif auto_augment_policy == "augmix":
-                transforms.append(T.AugMix(interpolation=interpolation, severity=augmix_severity))
-            else:
-                aa_policy = T.AutoAugmentPolicy(auto_augment_policy)
-                transforms.append(T.AutoAugment(policy=aa_policy, interpolation=interpolation))
 
         if backend == "pil":
             transforms.append(T.PILToTensor())
@@ -68,9 +54,6 @@ class ClassificationPresetTrain:
                 T.Normalize(mean=mean, std=std),
             ]
         )
-        if random_erase_prob > 0:
-            transforms.append(T.RandomErasing(p=random_erase_prob))
-
         if use_v2:
             transforms.append(T.ToPureTensor())
 
