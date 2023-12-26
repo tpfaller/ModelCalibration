@@ -1,7 +1,8 @@
 import datetime
 import os
 import time
-import warnings
+
+from sklearn import metrics
 
 import presets
 import torch
@@ -15,6 +16,16 @@ from torchvision.transforms.functional import InterpolationMode
 
 
 import mlflow
+
+
+def get_metrics(target: torch.Tensor, output: torch.Tensor):
+    if target.ndim == 2:
+        target = target.max(dim=1)[1]
+    labels = torch.argmax(output, 1)
+    y_true, y_pred = target.numpy(), labels.numpy()
+    acc = metrics.accuracy_score(y_true=y_true, y_pred=y_pred)
+    precision = metrics.precision_score(y_true=y_true, y_pred=y_pred)
+    return acc, precision
 
 
 def train_one_epoch(model, criterion, optimizer, data_loader, device, epoch, args, model_ema=None, scaler=None):
@@ -34,12 +45,16 @@ def train_one_epoch(model, criterion, optimizer, data_loader, device, epoch, arg
         loss.backward()
         optimizer.step()
 
-        acc1 = utils.accuracy(output, target, topk=(1, ))[0]
+        acc, precision = get_metrics(target=target, output=output)
+        print(acc, precision)
+
         batch_size = image.shape[0]
         metric_logger.update(loss=loss.item(), lr=optimizer.param_groups[0]["lr"])
-        metric_logger.meters["acc1"].update(acc1.item(), n=batch_size)
+        metric_logger.meters["acc"].update(acc, n=batch_size)
+        metric_logger.meters["precision"].update(precision, n=batch_size)
         metric_logger.meters["img/s"].update(batch_size / (time.time() - start_time))
 
+    # print(f"{header} Acc@1 {metric_logger.acc.global_avg:.3f}") # Acc@5 {metric_logger.acc5.global_avg:.3f}")
     return metric_logger
 
 
@@ -48,7 +63,6 @@ def evaluate(model, criterion, data_loader, device, print_freq=100, log_suffix="
     metric_logger = utils.MetricLogger(delimiter="  ")
     header = f"Test: {log_suffix}"
 
-    num_processed_samples = 0
     with torch.inference_mode():
         for image, target in metric_logger.log_every(data_loader, print_freq, header):
             image = image.to(device, non_blocking=True)
@@ -56,14 +70,15 @@ def evaluate(model, criterion, data_loader, device, print_freq=100, log_suffix="
             output = model(image)
             loss = criterion(output, target)
 
-            acc1 = utils.accuracy(output, target, topk=(1, ))[0]
+            
+            acc, precision = get_metrics(target=target, output=output)
 
             batch_size = image.shape[0]
             metric_logger.update(loss=loss.item())
-            metric_logger.meters["acc1"].update(acc1.item(), n=batch_size)
-            num_processed_samples += batch_size
+            metric_logger.meters["acc"].update(acc, n=batch_size)
+            metric_logger.meters["precision"].update(precision, n=batch_size)
 
-    print(f"{header} Acc@1 {metric_logger.acc1.global_avg:.3f}") # Acc@5 {metric_logger.acc5.global_avg:.3f}")
+    print(f"{header} Acc {metric_logger.acc.global_avg:.3f}") # Acc@5 {metric_logger.acc5.global_avg:.3f}")
     return metric_logger
 
 
@@ -189,7 +204,7 @@ def main(args):
     val_logger = evaluate(model, criterion, data_loader_test, device=device)
 
     mlflow.log_metrics({
-        "Val-Accuracy": val_logger.acc1.global_avg,
+        "Val-Accuracy": val_logger.acc.global_avg,
         "Val-Loss":  val_logger.loss.global_avg
     }, step=0)
 
@@ -200,9 +215,11 @@ def main(args):
         val_logger = evaluate(model, criterion, data_loader_test, device=device)
 
         mlflow.log_metrics({
-            "Train-Accuracy": train_logger.acc1.global_avg,
+            "Train-Accuracy": train_logger.acc.global_avg,
+            "Train-Precision": train_logger.precision.global_avg,
             "Train-Loss":  train_logger.loss.global_avg,
-            "Val-Accuracy": val_logger.acc1.global_avg,
+            "Val-Accuracy": val_logger.acc.global_avg,
+            "Val-Precision": val_logger.precision.global_avg,
             "Val-Loss":  val_logger.loss.global_avg
         }, step=epoch + 1)
 
