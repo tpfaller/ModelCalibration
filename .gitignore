@@ -1,6 +1,5 @@
 # custom
-/output
-/data
+/0_oldstuff
 /mlruns
 
 # Byte-compiled / optimized / DLL files

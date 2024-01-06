@@ -45,7 +45,7 @@ def calc_bins(y_test, preds):
 
 # get ECE and MCE metrics
 
-def get_metrics(y_test, preds):
+def get_calibration_metrics(y_test, preds):
     ECE = 0
     MCE = 0
     bins, _, bin_accs, bin_confs, bin_sizes = calc_bins(y_test, preds)
@@ -58,7 +58,7 @@ def get_metrics(y_test, preds):
 
 
 def draw_reliability_graph(y_test, preds):
-    ECE, MCE = get_metrics(y_test, preds)
+    ECE, MCE = get_calibration_metrics(y_test, preds)
     bins, _, bin_accs, _, _ = calc_bins(y_test, preds)
     fig = plt.figure(figsize=(15, 10), dpi=400)
     ax = fig.gca()
