@@ -8,13 +8,10 @@ from sklearn import metrics
 from sklearn.datasets import make_classification
 from sklearn.model_selection import train_test_split
 
-from sklearn.linear_model import LogisticRegression
-import ml_insights as mli
-from betacal import BetaCalibration
-
 from sklearn.calibration import calibration_curve
 
 import models
+from calibrators import PlattScaler, BetaCalibrationWrapper
 from calibration_utils import get_calibration_metrics
 
 
@@ -53,11 +50,6 @@ def get_dataset(ratio: float=1.0, reduce: bool=False):
     )
 
     return X_train, X_test, X_val, y_train, y_test, y_val
-
-
-def get_classifier():
-    lr = LogisticRegression()
-    return lr
 
 
 def get_metrics(y_true: np.ndarray, proba: np.ndarray):
@@ -151,7 +143,8 @@ def eval_test(model, X_test, y_test, criterion, device, epoch):
 
 
 def eval_calibrated_test(calibrator, calibratorname, proba_test, y_test, epoch):
-    calibrated_proba_test = calibrator.predict_proba(proba_test.reshape(-1, 1))[:,1]
+    calibrated_proba_test = calibrator.predict_proba(proba_test.reshape(-1, 1))
+
     acc, precision, recall, f1_score, aucroc = get_metrics(y_true=y_test, proba=calibrated_proba_test)
     ece, mce = get_calibration_metrics(y_test=y_test, preds=calibrated_proba_test)
     mlflow.log_metrics(
@@ -195,7 +188,7 @@ def eval_validation(model, X_val, y_val, criterion, device, epoch):
 
 
 def eval_calibrated_validation(calibrator, calibratorname, proba_val, y_val, epoch):
-    calibrated_proba_val = calibrator.predict_proba(proba_val.reshape(-1, 1))[:,1]
+    calibrated_proba_val = calibrator.predict_proba(proba_val.reshape(-1, 1))
     acc, precision, recall, f1_score, aucroc = get_metrics(y_true=y_val, proba=calibrated_proba_val)
     ece, mce = get_calibration_metrics(y_test=y_val, preds=calibrated_proba_val)
     mlflow.log_metrics(
@@ -257,11 +250,11 @@ def main():
     criterion = torch.nn.BCELoss()
     
     calibrators = {
-        "platt_scaler": LogisticRegression(),
-        "beta_calibrator": BetaCalibration()
+        "platt_scaler": PlattScaler(),
+        "beta_calibrator": BetaCalibrationWrapper()
     }
 
-    for epoch in tqdm(range(5000)):
+    for epoch in tqdm(range(500)):
         train(model, optim, X_train, y_train, criterion, device, epoch)
         proba_test = eval_test(model, X_test, y_test, criterion, device, epoch)
         proba_val = eval_validation(model, X_val, y_val, criterion, device, epoch)
