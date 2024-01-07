@@ -1,6 +1,8 @@
 # custom
 /0_oldstuff
 /mlruns
+/output
+/data
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

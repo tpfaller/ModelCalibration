@@ -1,6 +1,7 @@
+import os
+
 import numpy as np
 import torch
-import matplotlib.pyplot as plt
 import mlflow
 from tqdm import tqdm
 
@@ -8,48 +9,49 @@ from sklearn import metrics
 from sklearn.datasets import make_classification
 from sklearn.model_selection import train_test_split
 
-from sklearn.calibration import calibration_curve
 
 import models
-from calibrators import PlattScaler, BetaCalibrationWrapper
-from calibration_utils import get_calibration_metrics
+from calibrators import PlattScaler, BetaCalibrationWrapper, SplineCalibrationWrapper, get_calibration_metrics, plot_calibration_curves
+
+def get_dataset(ratio: float=1.0, reduce: bool=False, dataset:str="synthetic"):
+    if dataset == "synthetic":
+        X, y = make_classification(
+        n_samples=20000, n_features=20, n_informative=2, n_redundant=2, random_state=42
+        )
+
+        train_samples = 2000  # Samples used for training the models
+        ratio = 1 / ratio
+
+        if not reduce:
+            train_samples = int(ratio * train_samples)
+
+        X_train, X_first, y_train, y_first = train_test_split(
+            X,
+            y,
+            shuffle=True,
+            stratify=y,
+            train_size=train_samples,
+            test_size=2000,
+        )
+
+        all_negatives, all_positives = np.where(y_train == 0)[0], np.where(y_train == 1)[0]
+        reduced_positives = all_positives[:int(all_positives.shape[0] / ratio)]
+        X_train = np.concatenate([X_train[all_negatives], X_train[reduced_positives]])
+        y_train = np.concatenate([y_train[all_negatives], y_train[reduced_positives]])
 
 
-def get_dataset(ratio: float=1.0, reduce: bool=False):
-    X, y = make_classification(
-    n_samples=20000, n_features=20, n_informative=2, n_redundant=2, random_state=42
-    )
+        X_test, X_val, y_test, y_val = train_test_split(
+            X_first,
+            y_first,
+            stratify=y_first,
+            shuffle=True,
+            test_size=1000,
+        )
 
-    train_samples = 2000  # Samples used for training the models
-    ratio = 1 / ratio
-
-    if not reduce:
-        train_samples = int(ratio * train_samples)
-
-    X_train, X_first, y_train, y_first = train_test_split(
-        X,
-        y,
-        shuffle=True,
-        stratify=y,
-        train_size=train_samples,
-        test_size=2000,
-    )
-
-    all_negatives, all_positives = np.where(y_train == 0)[0], np.where(y_train == 1)[0]
-    reduced_positives = all_positives[:int(all_positives.shape[0] / ratio)]
-    X_train = np.concatenate([X_train[all_negatives], X_train[reduced_positives]])
-    y_train = np.concatenate([y_train[all_negatives], y_train[reduced_positives]])
-
-
-    X_test, X_val, y_test, y_val = train_test_split(
-        X_first,
-        y_first,
-        stratify=y_first,
-        shuffle=True,
-        test_size=1000,
-    )
-
-    return X_train, X_test, X_val, y_train, y_test, y_val
+        return X_train, X_test, X_val, y_train, y_test, y_val
+    
+    else:
+        return None
 
 
 def get_metrics(y_true: np.ndarray, proba: np.ndarray):
@@ -60,26 +62,6 @@ def get_metrics(y_true: np.ndarray, proba: np.ndarray):
     f1_score = (2 * precision * recall) / (precision + recall)
     aucroc = metrics.roc_auc_score(y_true=y_true, y_score=proba)
     return acc, precision, recall, f1_score, aucroc
-
-
-def plot_calibration_curve(classifier, X_test, y_test):
-    prob_pos, probs = calibration_curve(y_test, classifier.predict_proba(X_test)[:,1], n_bins=20)
-
-    plt.plot(probs,prob_pos)
-    plt.plot(probs[10],prob_pos[10],'r*')
-    plt.xlabel('Mittlere geschätzte Wahrscheinlichkeit')
-    plt.ylabel('Mittlere accuracy')
-    plt.grid()
-    plt.show()
-    # plt.close()
-
-
-def plot_histogram(classifier, X_test, y_test):
-    plt.hist(classifier.predict_proba(X_test)[y_test==0,1],np.linspace(0,1,21), alpha=0.5, label='y==0')
-    plt.hist(classifier.predict_proba(X_test)[y_test==1,1],np.linspace(0,1,21), alpha=0.5,  label='y==1')
-    plt.legend()
-    plt.show()
-    # plt.close()
 
 
 def train(model, optimizer, X_train, y_train, criterion, device, epoch):
@@ -94,9 +76,7 @@ def train(model, optimizer, X_train, y_train, criterion, device, epoch):
     proba = predictions.detach().numpy()[:, 1]
     acc, precision, recall, f1_score, aucroc = get_metrics(y_true=y_train, proba=proba)
     ece, mce = get_calibration_metrics(y_test=y_train, preds=proba)
-    
-    mlflow.log_metrics(
-        {
+    metrics = {
             "Train Loss": loss.item(),
             "Train Accuracy": acc,
             "Train Precision": precision,
@@ -105,9 +85,9 @@ def train(model, optimizer, X_train, y_train, criterion, device, epoch):
             "Train AUC": aucroc,
             "Train ECE": ece,
             "Train MCE": mce
-        },
-        step=epoch
-    )
+        }
+    mlflow.log_metrics(metrics, step=epoch)
+    return metrics
 
 
 def train_calibrator(calibrator, proba_test, y_test):
@@ -125,8 +105,7 @@ def eval_test(model, X_test, y_test, criterion, device, epoch):
     proba_test = predictions_test.numpy()[:, 1]
     acc, precision, recall, f1_score, aucroc = get_metrics(y_true=y_test, proba=proba_test)
     ece, mce = get_calibration_metrics(y_test=y_test, preds=proba_test)
-    mlflow.log_metrics(
-        {
+    metrics = {
             "Test Loss": loss.item(),
             "Test Accuracy": acc,
             "Test Precision": precision,
@@ -135,11 +114,10 @@ def eval_test(model, X_test, y_test, criterion, device, epoch):
             "Test AUC": aucroc,
             "Test ECE": ece,
             "Test MCE": mce
-        },
-        step=epoch
-    )
+        }
+    mlflow.log_metrics(metrics, step=epoch)
 
-    return proba_test
+    return metrics, proba_test
 
 
 def eval_calibrated_test(calibrator, calibratorname, proba_test, y_test, epoch):
@@ -147,8 +125,7 @@ def eval_calibrated_test(calibrator, calibratorname, proba_test, y_test, epoch):
 
     acc, precision, recall, f1_score, aucroc = get_metrics(y_true=y_test, proba=calibrated_proba_test)
     ece, mce = get_calibration_metrics(y_test=y_test, preds=calibrated_proba_test)
-    mlflow.log_metrics(
-        {
+    metrics = {
             f"Test {calibratorname} Accuracy": acc,
             f"Test {calibratorname} Precision": precision,
             f"Test {calibratorname} Recall": recall,
@@ -156,9 +133,9 @@ def eval_calibrated_test(calibrator, calibratorname, proba_test, y_test, epoch):
             f"Test {calibratorname} AUC": aucroc,
             f"Test {calibratorname} ECE": ece,
             f"Test {calibratorname} MCE": mce
-        },
-        step=epoch
-    )
+        }
+    mlflow.log_metrics(metrics ,step=epoch)
+    return metrics
 
 
 def eval_validation(model, X_val, y_val, criterion, device, epoch):
@@ -170,9 +147,7 @@ def eval_validation(model, X_val, y_val, criterion, device, epoch):
     proba_val = prediction.numpy()[:, 1]
     acc, precision, recall, f1_score, aucroc = get_metrics(y_true=y_val, proba=proba_val)
     ece, mce = get_calibration_metrics(y_test=y_val, preds=proba_val)
-
-    mlflow.log_metrics(
-        {
+    metrics = {
             "Val Loss": loss.item(),
             "Val Accuracy": acc,
             "Val Precision": precision,
@@ -181,18 +156,16 @@ def eval_validation(model, X_val, y_val, criterion, device, epoch):
             "Val AUC": aucroc,
             "Val ECE": ece,
             "Val MCE": mce,
-        },
-        step=epoch
-    )
-    return proba_val
+        }
+    mlflow.log_metrics(metrics ,step=epoch)
+    return metrics, proba_val
 
 
 def eval_calibrated_validation(calibrator, calibratorname, proba_val, y_val, epoch):
     calibrated_proba_val = calibrator.predict_proba(proba_val.reshape(-1, 1))
     acc, precision, recall, f1_score, aucroc = get_metrics(y_true=y_val, proba=calibrated_proba_val)
     ece, mce = get_calibration_metrics(y_test=y_val, preds=calibrated_proba_val)
-    mlflow.log_metrics(
-        {
+    metrics = {
             f"Val {calibratorname} Accuracy": acc,
             f"Val {calibratorname} Precision": precision,
             f"Val {calibratorname} Recall": recall,
@@ -200,22 +173,28 @@ def eval_calibrated_validation(calibrator, calibratorname, proba_val, y_val, epo
             f"Val {calibratorname} AUC": aucroc,
             f"Val {calibratorname} ECE": ece,
             f"Val {calibratorname} MCE": mce,
-        },
-        step=epoch
-    )
+        }
+    mlflow.log_metrics(metrics ,step=epoch)
+    return metrics, calibrated_proba_val
 
 
 def main():
     # Parameter List
     learning_rate = 0.01
     device = "cpu"
-    ratio = 1.0
-    reduce = False
+    epochs = 1000
 
-    X_train, X_test, X_val, y_train, y_test, y_val = get_dataset(ratio = ratio, reduce=reduce)
+    dataset="synthetic"
+    ratio = 0.2
+    reduce = True
+    out_dir = f"output/results/{dataset}_{ratio}{'_red' if reduce else ''}"
+
+    X_train, X_test, X_val, y_train, y_test, y_val = get_dataset(ratio=ratio, reduce=reduce,dataset=dataset)
     print(f"Train Ratio:  {np.sum(y_train) / (y_train.shape[0] - np.sum(y_train))}")
     print(f"Test Ratio:  {np.sum(y_test) / (y_test.shape[0] - np.sum(y_test))}")
     print(f"Val Ratio:  {np.sum(y_val) / (y_val.shape[0] - np.sum(y_val))}")
+
+    print(out_dir)
 
     mlflow.log_params(
         {
@@ -230,20 +209,6 @@ def main():
         }
     )
 
-    # classifier = get_classifier()
-    # classifier.fit(X_train, y_train)
-
-    # plot_calibration_curve(classifier, X_test, y_test)
-    # plot_histogram(classifier, X_test, y_test)
-
-    # platt_scaler = LogisticRegression()
-    # predicted_proba_test = classifier.predict_proba(X_test)
-    # predicted_proba_val = classifier.predict_proba(X_val)
-    # platt_scaler.fit(predicted_proba_test, y_test)
-
-    # plot_calibration_curve(platt_scaler, predicted_proba_val, y_val)
-    # plot_histogram(platt_scaler, predicted_proba_val, y_val)
-    # plt.close()
 
     model = models.LogRegression(X_train.shape[1])
     optim = torch.optim.SGD(model.parameters(), lr=learning_rate)
@@ -251,21 +216,46 @@ def main():
     
     calibrators = {
         "platt_scaler": PlattScaler(),
-        "beta_calibrator": BetaCalibrationWrapper()
+        "beta_calibrator": BetaCalibrationWrapper(),
+        "spline_calibrator": SplineCalibrationWrapper()
     }
 
-    for epoch in tqdm(range(500)):
-        train(model, optim, X_train, y_train, criterion, device, epoch)
-        proba_test = eval_test(model, X_test, y_test, criterion, device, epoch)
-        proba_val = eval_validation(model, X_val, y_val, criterion, device, epoch)
+    highest_auc = .0
+    for epoch in tqdm(range(epochs)):
+        m_train = train(model, optim, X_train, y_train, criterion, device, epoch)
+        m_test, proba_test = eval_test(model, X_test, y_test, criterion, device, epoch)
+        m_val, proba_val = eval_validation(model, X_val, y_val, criterion, device, epoch)
         
-        for name, calibrator in calibrators.items():
-            calibrator = train_calibrator(calibrator, proba_test, y_test)
-            eval_calibrated_test(calibrator, name, proba_test, y_test, epoch)
-            eval_calibrated_validation(calibrator, name, proba_val, y_val, epoch)
         
-    # plot_calibration_curve(model, X_test, y_test)
-    # plot_histogram(model, X_test, y_test)
+        if m_val["Val AUC"] > highest_auc:
+            highest_auc = m_val["Val AUC"]
+            metrics = {}
+            metrics["epoch"] = epoch
+            metrics["proba_val"] = proba_val
+            metrics["y_true"] = y_val
+            metrics.update(m_train)
+            metrics.update(m_test)
+            metrics.update(m_val)
+            for name, calibrator in calibrators.items():
+                calibrator = train_calibrator(calibrator, proba_test, y_test)
+                m_cal_test = eval_calibrated_test(calibrator, name, proba_test, y_test, epoch)
+                m_cal_val, cal_proba = eval_calibrated_validation(calibrator, name, proba_val, y_val, epoch)
+                metrics.update(m_cal_test)
+                metrics.update(m_cal_val)
+                metrics[f"{name}_proba"] = cal_proba
+
+    if highest_auc > .0:
+        print("Highest AUC: ", highest_auc)
+        os.makedirs(out_dir, exist_ok=True)
+        calib_file = os.path.join(out_dir, f"calibration_curve_{metrics['epoch']}.png")
+        plot_calibration_curves(
+            filename=calib_file, 
+            y_true=metrics["y_true"], 
+            uncalib=metrics["proba_val"],
+            platt=metrics["platt_scaler_proba"],
+            beta=metrics["beta_calibrator_proba"],
+            spline=metrics["spline_calibrator_proba"]
+            )
 
 
 if __name__ == '__main__':

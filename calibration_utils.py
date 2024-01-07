@@ -22,38 +22,7 @@ import matplotlib.patches as mpatches
 # import ml_insights as mli
 # from betacal import BetaCalibration
 
-#custom functions to generate reliability diagram
-def calc_bins(y_test, preds):
-    num_bins = 10
-    bins = np.linspace(0.1, 1, num_bins)
-    binned = np.digitize(preds, bins)  
-    bin_accs = np.zeros(num_bins)
-    bin_confs = np.zeros(num_bins)
-    bin_sizes = np.zeros(num_bins)
 
-    for bin in range(num_bins):
-        bin_sizes[bin] = len(preds[binned == bin])
-        if bin_sizes[bin] > 0:
-            bin_accs[bin] = (y_test[binned==bin]).sum() / bin_sizes[bin]
-            bin_confs[bin] = (preds[binned==bin]).sum() / bin_sizes[bin]
-        else:
-            bin_accs[bin] = 0.
-            bin_confs[bin] = 0.
-
-    return bins, binned, bin_accs, bin_confs, bin_sizes
-
-
-# get ECE and MCE metrics
-
-def get_calibration_metrics(y_test, preds):
-    ECE = 0
-    MCE = 0
-    bins, _, bin_accs, bin_confs, bin_sizes = calc_bins(y_test, preds)
-    for i in range(len(bins)):
-        abs_conf_dif = abs(bin_accs[i] - bin_confs[i])
-        ECE += (bin_sizes[i] / sum(bin_sizes)) * abs_conf_dif
-        MCE = max(MCE, abs_conf_dif)
-    return ECE,MCE
 
 
 
