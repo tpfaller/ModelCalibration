@@ -1,4 +1,6 @@
 import os
+import argparse
+from collections import OrderedDict
 
 import numpy as np
 import torch
@@ -8,46 +10,12 @@ from tqdm import tqdm
 from sklearn import metrics
 from sklearn.datasets import make_classification
 from sklearn.model_selection import train_test_split
+import torchvision
+from torch import nn
 
 import models
 from calibrators import PlattScaler, BetaCalibrationWrapper, SplineCalibrationWrapper, get_calibration_metrics, plot_calibration_curves
-
-
-def get_dataset(ratio: float=1.0, reduce: bool=False, dataset:str="synthetic"):
-    X, y = make_classification(
-    n_samples=20000, n_features=20, n_informative=2, n_redundant=2, random_state=42
-    )
-
-    train_samples = 2000  # Samples used for training the models
-    ratio = 1 / ratio
-
-    if not reduce:
-        train_samples = int(ratio * train_samples)
-
-    X_train, X_first, y_train, y_first = train_test_split(
-        X,
-        y,
-        shuffle=True,
-        stratify=y,
-        train_size=train_samples,
-        test_size=2000,
-    )
-
-    all_negatives, all_positives = np.where(y_train == 0)[0], np.where(y_train == 1)[0]
-    reduced_positives = all_positives[:int(all_positives.shape[0] / ratio)]
-    X_train = np.concatenate([X_train[all_negatives], X_train[reduced_positives]])
-    y_train = np.concatenate([y_train[all_negatives], y_train[reduced_positives]])
-
-
-    X_test, X_val, y_test, y_val = train_test_split(
-        X_first,
-        y_first,
-        stratify=y_first,
-        shuffle=True,
-        test_size=1000,
-    )
-    return X_train, X_test, X_val, y_train, y_test, y_val
-
+from image_functions.presets import ClassificationPresetTrain, ClassificationPresetEval
 
 def get_metrics(y_true: np.ndarray, proba: np.ndarray):
     y_pred = np.where(proba > .5 , 1, 0)
@@ -59,20 +27,27 @@ def get_metrics(y_true: np.ndarray, proba: np.ndarray):
     return acc, precision, recall, f1_score, aucroc
 
 
-def train(model, optimizer, X_train, y_train, criterion, device, epoch):
-    optimizer.zero_grad()
-    predictions = model(torch.Tensor(X_train).to(device))
-    target=torch.stack([1-torch.Tensor(y_train), torch.Tensor(y_train)],axis=1).squeeze().to(device)
-    loss = criterion(predictions, target)
-    loss.backward()
-    optimizer.step()
+def train(model, optimizer, loader, y_train, criterion, device, epoch):
+    losses = []
+    predicted_probas = []
+    y_true = []
+    for image, target in loader:
+        optimizer.zero_grad()
+        image, target = image.to(device), target.to(device)
+        predictions = model(image)
+        loss = criterion(predictions[:, 1], target.to(torch.float32))
+        loss.backward()
+        optimizer.step()
+        losses.append(loss.item())
+        predicted_probas.append(predictions.detach().numpy()[:, 1])
+        y_true.append(target.detach().numpy())
 
-    # y_pred = torch.argmax(predictions, 1).numpy()
-    proba = predictions.detach().numpy()[:, 1]
+    proba = np.concatenate(predicted_probas, axis=0)
+    y_train = np.concatenate(y_true, axis=0)
     acc, precision, recall, f1_score, aucroc = get_metrics(y_true=y_train, proba=proba)
     ece, mce = get_calibration_metrics(y_test=y_train, preds=proba)
     metrics = {
-            "Train Loss": loss.item(),
+            "Train Loss": sum(losses) / len(losses),
             "Train Accuracy": acc,
             "Train Precision": precision,
             "Train Recall": recall,
@@ -91,11 +66,11 @@ def train_calibrator(calibrator, proba_test, y_test):
     return calibrator
 
 
-def eval_test(model, X_test, y_test, criterion, device, epoch):
+def eval_test(model, loader, y_test, criterion, device, epoch):
+    image, target = next(iter(loader))
     with torch.no_grad():
-        predictions_test = model(torch.Tensor(X_test).to(device))
-        target=torch.stack([1-torch.Tensor(y_test), torch.Tensor(y_test)],axis=1).squeeze().to(device)
-        loss = criterion(predictions_test, target)
+        predictions_test = model(image.to(device))
+        loss = criterion(predictions_test[:, 1], target.to(torch.float32))
     
     proba_test = predictions_test.numpy()[:, 1]
     acc, precision, recall, f1_score, aucroc = get_metrics(y_true=y_test, proba=proba_test)
@@ -133,11 +108,11 @@ def eval_calibrated_test(calibrator, calibratorname, proba_test, y_test, epoch):
     return metrics
 
 
-def eval_validation(model, X_val, y_val, criterion, device, epoch):
+def eval_validation(model, loader, y_val, criterion, device, epoch):
+    image, target = next(iter(loader))
     with torch.no_grad():
-        prediction = model(torch.Tensor(X_val).to(device))
-        target=torch.stack([1-torch.Tensor(y_val), torch.Tensor(y_val)],axis=1).squeeze().to(device)
-        loss = criterion(prediction, target)
+        prediction = model(image.to(device))
+        loss = criterion(prediction[:, 1], target.to(torch.float32))
 
     proba_val = prediction.numpy()[:, 1]
     acc, precision, recall, f1_score, aucroc = get_metrics(y_true=y_val, proba=proba_val)
@@ -175,17 +150,55 @@ def eval_calibrated_validation(calibrator, calibratorname, proba_val, y_val, epo
 
 def main():
     # Parameter List
-    learning_rate = 0.01
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--lr", type=float, default=0.0001)
+    parser.add_argument("--weight_decay", type=float, default=0.0001)
+    parser.add_argument("--freeze_backbone", action="store_true")
+    parser.add_argument("--epochs", type=int, default=100)
+    parser.add_argument("--image_size", type=int, default=32)
+    parser.add_argument("--ratio", type=str, default="1.0", choices=["1.0", "0.6", "0.2"])
+    args = parser.parse_args()
+
+    learning_rate = args.lr
     device = "cpu"
-    epochs = 1000
+    epochs = args.epochs
 
-    dataset="synthetic"
-    ratio = 0.6
     reduce = True
-    out_dir = f"output/results/{dataset}_{ratio}{'_red' if reduce else ''}"
+    out_dir = f"output/results/images/ratio_{args.ratio}"
 
-    X_train, X_test, X_val, y_train, y_test, y_val = get_dataset(ratio=ratio, reduce=reduce,dataset=dataset)
-    print(f"Train Ratio:  {np.sum(y_train) / (y_train.shape[0] - np.sum(y_train))}")
+    model = torchvision.models.get_model("mobilenet_v3_small", weights="DEFAULT")
+    if args.freeze_backbone:
+        for param in model.parameters():
+            param.requires_grad = False
+
+    model.classifier= nn.Sequential(OrderedDict([
+        ("0", nn.Linear(in_features=576, out_features=1024, bias=True)),
+        ("1", nn.Hardswish()),
+        ("2", nn.Dropout(p=0.2, inplace=True)),
+        ("3", nn.Linear(in_features=1024, out_features=2, bias=True)),
+        ("4", nn.Sigmoid())
+    ]))
+    model.to(device)
+
+
+    train_preproc = ClassificationPresetTrain(resize_size=args.image_size, crop_size=args.image_size)
+    test_preproc = ClassificationPresetEval(resize_size=args.image_size, crop_size=args.image_size)
+
+    train_set = torchvision.datasets.ImageFolder("data/train_1.0", transform=train_preproc)
+    train_loader = torch.utils.data.DataLoader(train_set, batch_size=32, shuffle=True)
+
+
+    test_set = torchvision.datasets.ImageFolder("data/test", transform=test_preproc)
+    test_loader = torch.utils.data.DataLoader(test_set, batch_size=len(test_set), shuffle=False)
+    _, y_test = next(iter(test_loader))
+    y_test = y_test.numpy()
+
+    val_set = torchvision.datasets.ImageFolder("data/val", transform=test_preproc)
+    val_loader = torch.utils.data.DataLoader(val_set, batch_size=len(val_set), shuffle=False)
+    _, y_val = next(iter(val_loader))
+    y_val = y_val.numpy()
+
+    print(f"Train Ratio:  {args.ratio}")
     print(f"Test Ratio:  {np.sum(y_test) / (y_test.shape[0] - np.sum(y_test))}")
     print(f"Val Ratio:  {np.sum(y_val) / (y_val.shape[0] - np.sum(y_val))}")
 
@@ -193,20 +206,20 @@ def main():
 
     mlflow.log_params(
         {
-            "train_pos": np.sum(y_train), 
-            "train_neg": y_train.shape[0] - np.sum(y_train),
+
             "test_pos": np.sum(y_test), 
             "test_neg": y_test.shape[0] - np.sum(y_test),
             "val_pos": np.sum(y_val), 
             "val_neg": y_val.shape[0] - np.sum(y_val),
-            "ratio": ratio, 
-            "reduce": reduce
+            "ratio": args.ratio, 
+            "reduce": reduce, 
+            "lr": learning_rate,
+            "wd": args.weight_decay
         }
     )
 
-
-    model = models.LogRegression(X_train.shape[1])
-    optim = torch.optim.SGD(model.parameters(), lr=learning_rate)
+    # optim = torch.optim.SGD(model.parameters(), lr=learning_rate)
+    optim = torch.optim.Adam(model.parameters(), lr=learning_rate, weight_decay=args.weight_decay)
     criterion = torch.nn.BCELoss()
     
     calibrators = {
@@ -217,9 +230,9 @@ def main():
 
     highest_auc = .0
     for epoch in tqdm(range(epochs)):
-        m_train = train(model, optim, X_train, y_train, criterion, device, epoch)
-        m_test, proba_test = eval_test(model, X_test, y_test, criterion, device, epoch)
-        m_val, proba_val = eval_validation(model, X_val, y_val, criterion, device, epoch)
+        m_train = train(model, optim, train_loader, None, criterion, device, epoch)
+        m_test, proba_test = eval_test(model, test_loader, y_test, criterion, device, epoch)
+        m_val, proba_val = eval_validation(model, val_loader, y_val, criterion, device, epoch)
         
         
         if m_val["Val AUC"] > highest_auc:
