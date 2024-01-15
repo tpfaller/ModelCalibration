@@ -253,7 +253,12 @@ def main():
                 metrics[f"{name}_proba"] = cal_proba
 
     if highest_auc > .0:
+        print("Datset Ratio: ", args.ratio)
         print("Highest AUC: ", highest_auc)
+        print("Val ECE: ", metrics["Val ECE"])
+        print("Val platt_scaler ECE: ", metrics["Val platt_scaler ECE"])
+        print("Val beta_calibrator ECE: ", metrics["Val beta_calibrator ECE"])
+        print("Val spline_calibrator ECE: ", metrics["Val spline_calibrator ECE"])
         os.makedirs(out_dir, exist_ok=True)
         calib_file = os.path.join(out_dir, f"calibration_curve_{metrics['epoch']}.png")
 

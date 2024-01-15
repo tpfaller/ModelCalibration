@@ -1,4 +1,5 @@
 import os
+import argparse
 
 import numpy as np
 import torch
@@ -174,13 +175,19 @@ def eval_calibrated_validation(calibrator, calibratorname, proba_val, y_val, epo
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--epochs", type=int, default=100)
+    parser.add_argument("--ratio", type=float, default=0.6)
+    args = parser.parse_args()
+
+
     # Parameter List
     learning_rate = 0.01
     device = "cpu"
-    epochs = 1000
+    epochs = args.epochs
 
     dataset="synthetic"
-    ratio = 0.6
+    ratio = args.ratio
     reduce = True
     out_dir = f"output/results/{dataset}_{ratio}{'_red' if reduce else ''}"
 
@@ -240,7 +247,12 @@ def main():
                 metrics[f"{name}_proba"] = cal_proba
 
     if highest_auc > .0:
+        print("Datset Ratio: ", args.ratio)
         print("Highest AUC: ", highest_auc)
+        print("Val ECE: ", metrics["Val ECE"])
+        print("Val platt_scaler ECE: ", metrics["Val platt_scaler ECE"])
+        print("Val beta_calibrator ECE: ", metrics["Val beta_calibrator ECE"])
+        print("Val spline_calibrator ECE: ", metrics["Val spline_calibrator ECE"])
         os.makedirs(out_dir, exist_ok=True)
         calib_file = os.path.join(out_dir, f"calibration_curve_{metrics['epoch']}.png")
 

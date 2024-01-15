@@ -16,6 +16,7 @@ class ClassificationPresetTrain:
     ):
         transforms = []
         transforms.append(T.PILToTensor())
+        transforms.append(T.RandomEqualize(p=0.2))
         transforms.append(T.ConvertImageDtype(torch.float))
 
         transforms += [
@@ -25,8 +26,11 @@ class ClassificationPresetTrain:
         if hflip_prob > 0:
             transforms.append(T.RandomHorizontalFlip(hflip_prob))
             transforms.append(T.RandomVerticalFlip(hflip_prob))
-            transforms.append(T.ColorJitter(brightness=0.3, contrast=0.3))
+            # transforms.append(T.ColorJitter(brightness=0.3, contrast=0.3))
+            # transforms.append(T.RandomErasing(p=0.2))
+            transforms.append(T.ColorJitter(brightness=0.5, contrast=0.5, saturation=.3, hue=.05))
             transforms.append(T.RandomErasing(p=0.2))
+            
         transforms.append(T.Normalize(mean=mean, std=std))
         self.transforms = T.Compose(transforms)
 
